@@ -1,4 +1,4 @@
-# Eksporter biblioteczki lubimyczytac.pl
+# Eksport biblioteki lubimyczytac.pl
 
 Skrypt, który zapisuje biblioteczkę z serwisu [lubimyczytac.pl](https://lubimyczytac.pl)
 do pliku CSV. \
