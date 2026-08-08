@@ -44,7 +44,7 @@
     addBOM:           false, // true is friendlier to Excel, but can upset
                              // Goodreads' column detection
     debug:            true,  // print fill rates + keep a sample row
-    filename:         'lubimyczytac_export.csv',
+    filename:         `lubimyczytac_export-${new Date().toISOString().slice(0, 10)}.csv`,
 
     // --- pacing and retries -------------------------------------------------
     listDelayMs:     2000,               // pause between library list pages
