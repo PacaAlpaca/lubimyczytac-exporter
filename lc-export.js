@@ -91,7 +91,7 @@
         await sleep(wait);
         continue;
       }
-      if (!res.ok) throw new Error(`${label}: HTTP ${res.status}`);
+      if (!res.ok) throw Object.assign(new Error(`${label}: HTTP ${res.status}`), { status: res.status });
       return res;
     }
   }
@@ -215,17 +215,19 @@
       body: buildBody(page, shelfId),
     }, label);
     const raw = await res.text();
-    let html;
+    let html, total = NaN;
     try {
       const json = JSON.parse(raw);
       if (json.code && json.code !== 'OK') throw new Error('API returned ' + json.code);
       html = extractHTML(json);
+      // data.count is the number of books matching the filter (whole shelf).
+      total = parseInt(json?.data?.count, 10);
     } catch (e) {
       if (/^\s*[{[]/.test(raw)) throw e;
       html = raw;
     }
     if (!html) throw new Error(label + ': no HTML in response');
-    return new DOMParser().parseFromString(html, 'text/html');
+    return { doc: new DOMParser().parseFromString(html, 'text/html'), total };
   }
 
   // ------------------------------------------------------------- extraction
@@ -262,9 +264,10 @@
   function parseCard(card, shelfName) {
     const id = card.getAttribute('data-book-id') || (card.id.match(/(\d+)/) || [])[1] || '';
 
-    const author = Array.from(new Set(
+    const authors = Array.from(new Set(
       Array.from(card.querySelectorAll('a[href*="/autor/"]'))
-        .map(a => oneLine(a.textContent)).filter(Boolean))).join(', ');
+        .map(a => oneLine(a.textContent)).filter(Boolean)));
+    const author = authors.join(', ');
 
     const picked = pickTitle(card, author);
     const titleText = picked.text;
@@ -303,11 +306,19 @@
     // Review: the text sits in a <p class="expandTextNoJS"> inside
     // .book-card__review, wrapped in comment scaffolding we do not want.
     // Cards carrying one are also tagged .book-card--with-review.
+    // Line breaks are <br> tags, which textContent drops, and the raw text
+    // carries the template's indentation - so mark the <br>s, flatten the
+    // whitespace, then turn the marks back into newlines.
     let myReview = '';
     if (CONFIG.includeReview) {
       const paras = Array.from(card.querySelectorAll('.book-card__review p.expandTextNoJS'));
-      const best = paras.map(txt).sort((a, b) => b.length - a.length)[0] || '';
-      myReview = best.split('\n').map(l => l.replace(/[ \t]+/g, ' ').trim()).join('\n')
+      const reviewText = p => {
+        const c = p.cloneNode(true);
+        c.querySelectorAll('br').forEach(br => br.replaceWith(''));
+        return oneLine(txt(c));
+      };
+      const best = paras.map(reviewText).sort((a, b) => b.length - a.length)[0] || '';
+      myReview = best.split('').map(l => l.trim()).join('\n')
                      .replace(/\n{3,}/g, '\n\n').trim();
     }
 
@@ -323,7 +334,7 @@
     const format = /\/audiobook\/\d+/.test(url) ? 'audiobook'
                  : /\/ebook\/\d+/.test(url)     ? 'ebook' : 'book';
 
-    return { id, title: titleText, author, myRating, avgRating, dateRead,
+    return { id, title: titleText, author, authors, myRating, avgRating, dateRead,
              shelves, myReview, url, format,
              isbn: '', publisher: '', yearPub: '', yearOrig: '' };
   }
@@ -334,13 +345,16 @@
 
   async function collectShelf(shelf) {
     const label = shelf ? `shelf "${shelf.name || shelf.id}"` : 'library';
-    let addedTotal = 0;
+    let addedTotal = 0, seen = 0, total = NaN;
 
     for (let page = 1; page <= CONFIG.maxPages; page++) {
       let doc;
       try {
-        doc = await fetchListPage(page, shelf?.id, `${label} page ${page}`);
+        ({ doc, total } = await fetchListPage(page, shelf?.id, `${label} page ${page}`));
       } catch (e) {
+        // The site answers 404 for a page past the end, which happens when the
+        // shelf size is an exact multiple of the page size.
+        if (e.status === 404 && page > 1) { log(`${label}: no page ${page} - done`); break; }
         warn(`${label}: stopping at page ${page} - ${e.message}`);
         break;
       }
@@ -364,7 +378,10 @@
           added++; addedTotal++;
         }
       }
-      log(`${label} page ${page}: ${cards.length} rows, +${added} new (total ${byId.size})`);
+      seen += cards.length;
+      const of = Number.isFinite(total) ? `/${Math.ceil(total / PAGE_SIZE_HINT)}` : '';
+      log(`${label} page ${page}${of}: ${cards.length} rows, +${added} new (total ${byId.size})`);
+      if (Number.isFinite(total) && seen >= total) { log(`${label}: all ${total} books read`); break; }
       if (cards.length < PAGE_SIZE_HINT) { log(`${label}: short page - last one`); break; }
       await sleep(CONFIG.listDelayMs);
     }
@@ -405,6 +422,11 @@
               else if (/^\s*Data\s+1\.\s*wyd/i.test(label))     book.yearOrig = (value.match(/\d{4}/) || [''])[0];
             }
           }
+          // Unknown ISBNs are filled in as "000-00-0000-00-0", and some real ones
+          // carry hyphens. A dummy ISBN makes Goodreads skip the book, so drop it
+          // and let Goodreads match on title and author instead.
+          book.isbn = book.isbn.replace(/[^0-9Xx]/g, '').toUpperCase();
+          if (!/^(?:\d{9}[\dX]|\d{13})$/.test(book.isbn) || /^0+$/.test(book.isbn)) book.isbn = '';
           const pub = doc.querySelector('a[href*="/wydawnictwo/"]');
           if (pub) book.publisher = oneLine(pub.textContent);
         } catch (e) {
@@ -432,12 +454,22 @@
   ];
   // Now that audiobooks are identifiable from the URL, this is free data.
   if (CONFIG.includeFormat) COLUMNS.splice(6, 0, ['Binding', b => b.format]);
+  // Goodreads' sample file keeps the exclusive shelf in "Shelves" and any
+  // other shelves, space-separated, in "Bookshelves". Co-authors go in
+  // "Additional Authors" so "Author" holds a single name to match on.
+  if (CONFIG.goodreadsFormat) {
+    COLUMNS.splice(2, 0, ['Additional Authors', b => b.additionalAuthors]);
+    COLUMNS.splice(COLUMNS.findIndex(([h]) => h === 'Shelves') + 1, 0,
+                   ['Bookshelves', b => b.bookshelves]);
+  }
 
   const SHELF_MAP = { 'przeczytane': 'read', 'teraz czytam': 'currently-reading',
                       'czytam teraz': 'currently-reading', 'chcę przeczytać': 'to-read' };
 
   function toGoodreads(b) {
     const o = { ...b };
+    o.author = b.authors[0] || b.author;
+    o.additionalAuthors = b.authors.slice(1).join(', ');
     const r = parseInt(b.myRating, 10);
     if (Number.isFinite(r) && r > 0) o.myRating = String(Math.ceil(r / 2));
     const a = parseFloat(String(b.avgRating).replace(',', '.'));
@@ -445,8 +477,10 @@
     if (/^\d{4}$/.test(b.dateRead))                  o.dateRead = b.dateRead + '/01/01';
     else if (/^\d{4}-\d{2}$/.test(b.dateRead))       o.dateRead = b.dateRead.replace('-', '/') + '/01';
     else if (/^\d{4}-\d{2}-\d{2}$/.test(b.dateRead)) o.dateRead = b.dateRead.replace(/-/g, '/');
-    o.shelves = String(b.shelves).split(',').map(s => s.trim()).filter(Boolean)
-      .map(s => SHELF_MAP[s.toLowerCase()] ?? s.replace(/ /g, '-')).join(', ');
+    const names = String(b.shelves).split(',').map(s => s.trim()).filter(Boolean);
+    o.shelves = names.map(s => SHELF_MAP[s.toLowerCase()]).find(Boolean) || '';
+    o.bookshelves = names.filter(s => !SHELF_MAP[s.toLowerCase()])
+      .map(s => s.toLowerCase().replace(/\s+/g, '-')).join(' ');
     return o;
   }
 
@@ -480,7 +514,7 @@
     window.__lcSampleCard = sampleCard;
     log('first row HTML kept in window.__lcSampleCard');
   }
-  console.table(rows.slice(0, 10).map(({ url, id, myReview, ...r }) => r));
+  console.table(rows.slice(0, 10).map(({ url, id, myReview, authors, ...r }) => r));
 
   // --------------------------------------------------------------- download
   const blob = new Blob([CONFIG.addBOM ? '\ufeff' + csv : csv], { type: 'text/csv;charset=utf-8' });
@@ -500,4 +534,9 @@
   const reviewed = all.filter(b => b.myReview).length;
   const audio = all.filter(b => b.format === 'audiobook').length;
   log(`done: ${rows.length} books (${reviewed} with a review, ${audio} audiobooks)`);
+  if (CONFIG.goodreadsFormat && audio) {
+    warn(`Goodreads often has no entry for Polish audiobooks, so some of these ${audio} ` +
+         'may fail to import and need adding by hand:\n' +
+         all.filter(b => b.format === 'audiobook').map(b => `  ${b.title} - ${b.author}`).join('\n'));
+  }
 })().catch(e => console.error('[lc-export] failed:', e));
