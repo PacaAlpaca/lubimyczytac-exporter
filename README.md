@@ -25,10 +25,11 @@ albo do przeniesienia biblioteczki do innego serwisu (np. [Goodreads](https://ww
    - Jeżeli przeglądarka poprosi o wpisanie `allow pasting` albo `zezwalaj na wklejanie` -
      wpisz to i naciśnij Enter, a potem wklej skrypt ponownie.
 5. Naciśnij **Enter** i poczekaj. W konsoli pojawiają się komunikaty o postępie (przescroluj w dół - konsola może nie przewijać do najnowszych komunikatów).
-6. Po zakończeniu przeglądarka sama pobierze plik `lubimyczytac_export.csv`.
+6. Po zakończeniu przeglądarka sama pobierze plik `lubimyczytac_export-RRRR-MM-DD.csv`
+   (z dzisiejszą datą w nazwie).
 
 Domyślnie eksportowana jest tylko półka **Przeczytane**. Dla ok. 500 książek zajmuje to
-około 30 sekund.
+około minuty.
 
 ---
 
@@ -44,11 +45,11 @@ edytorze tekstu (np. Notatniku).
 | `includeRating` | `true` | Czy dołączyć twoje oceny (skala 1–10). |
 | `includeReview` | `true` | Czy dołączyć twoje recenzje (te widoczne pod książką na liście). |
 | `goodreadsFormat` | `false` | `true` przelicza oceny na skalę 1–5, tłumaczy nazwy półek na angielskie (`read`, `to-read`, `currently-reading`) i zapisuje daty jako `RRRR/MM/DD` - czyli przygotowuje plik pod import do Goodreads. |
-| `fetchBookPages` | `false` | `true` dociąga **ISBN**, wydawnictwo i rok wydania. Wymaga jednego dodatkowego zapytania na każdą książkę, ze specjalnie ustawionym wolnym tempem zapytań dla 500 pozycji trwa kilkanaście minut. Włącz tylko, jeśli naprawdę potrzebujesz tych informacji. |
+| `fetchBookPages` | `false` | `true` dociąga **ISBN**, wydawnictwo i rok wydania. Wymaga jednego dodatkowego zapytania na każdą książkę, ze specjalnie ustawionym wolnym tempem zapytań dla 500 pozycji trwa ok. pół godziny. Włącz tylko, jeśli naprawdę potrzebujesz tych informacji. |
 | `includeFormat` | `false` | `true` dodaje kolumnę `Binding` z informacją, czy pozycja to `book`, `audiobook` czy `ebook`. |
 | `dropEmptyColumns` | `false` | `true` usuwa z pliku kolumny, które w całości pozostały puste (przydatne przy `fetchBookPages: false`). |
 | `addBOM` | `false` | `true` ułatwia Excelowi rozpoznanie polskich znaków, ale **może przeszkodzić** przy imporcie do Goodreads. |
-| `filename` | `lubimyczytac_export.csv` | Nazwa pobieranego pliku. |
+| `filename` | `lubimyczytac_export-RRRR-MM-DD.csv` | Nazwa pobieranego pliku. |
 
 ---
 
@@ -76,7 +77,12 @@ zamiast polskich znaków, ustaw `addBOM: true` i wygeneruj plik ponownie
 3. Wygeneruj plik i wgraj go na stronie <https://www.goodreads.com/review/import>.
 
 Goodreads dopasowuje książki automatycznie i nie zawsze trafia idealnie -
-po imporcie warto przejrzeć wynik.
+po imporcie warto przejrzeć wynik. Import trwa kilkanaście minut; wynik (z listą książek,
+których nie udało się dopasować) pojawia się na tej samej stronie po odświeżeniu.
+Najczęściej brakuje audiobooków i słuchowisk - te trzeba dodać ręcznie.
+
+Import **nadpisuje** oceny i recenzje książek, które już masz na półkach w Goodreads.
+Ten sam plik można importować wielokrotnie - książki się nie zdublują.
 
 ---
 
@@ -110,4 +116,4 @@ Skrypt powstał jako następca rozszerzenia
 działać po zmianie wyglądu serwisu.
 
 Serwis może zmienić swoją stronę w każdej chwili i wtedy skrypt przestanie działać -
-to normalne ryzyko przy tego typu narzędziach.
+standardowe ryzyko przy tego typu narzędziach.
